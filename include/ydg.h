@@ -6,15 +6,15 @@ typedef struct {
     uint32_t offset;         // QOI data block offset
     uint32_t size;           // QOI data block size
     uint16_t x_offset;       // x_offset (guess)
-	uint16_t tileHeight;     // tile height
+    uint16_t tileHeight;     // tile height
     uint32_t unknown;        // unknown
 } YDG_TileIndex;
 
 typedef struct {
     // 0x10 - 0x20: unknown1
-	uint32_t reserved1[4];
+    uint32_t reserved1[4];
 
-	// 0x20: Width, Height
+    // 0x20: Width, Height
     uint16_t width;
     uint16_t height;
 
@@ -45,7 +45,7 @@ typedef struct {
     // 0x0C: HeaderData Size
     uint32_t headerDataSize;
 
-	YDG_HeaderData headerData;
+    YDG_HeaderData headerData;
 } YDG_Header;
 
 #pragma pack(pop)
