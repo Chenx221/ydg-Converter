@@ -19,12 +19,15 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "include/stb_image_write.h"
 
+#include "webp/decode.h"
+
 namespace {
 
 struct DecodedTile {
     uint16_t xOffset = 0;
     uint16_t logicalHeight = 0;
-    qoi_desc desc{};
+    int imgWidth = 0;
+    int imgHeight = 0;
     std::vector<std::uint8_t> rgba;
 };
 
@@ -119,46 +122,69 @@ static bool DecodeYdg(
     for (std::uint32_t i = 0; i < tileCount; ++i) {
         const std::size_t entryOffset = tileTableOffset + static_cast<std::size_t>(i) * sizeof(YDG_TileIndex);
 
-        const std::uint32_t qoiOffset = ReadU32LE(fileBytes, entryOffset + 0);
-        const std::uint32_t qoiSize = ReadU32LE(fileBytes, entryOffset + 4);
-        const std::uint16_t xOffset = ReadU16LE(fileBytes, entryOffset + 8);
-        const std::uint16_t tileHeight = ReadU16LE(fileBytes, entryOffset + 10);
+        const std::uint32_t blockOffset = ReadU32LE(fileBytes, entryOffset + 0);
+        const std::uint32_t blockSize   = ReadU32LE(fileBytes, entryOffset + 4);
+        const std::uint16_t xOffset     = ReadU16LE(fileBytes, entryOffset + 8);
+        const std::uint16_t tileHeight  = ReadU16LE(fileBytes, entryOffset + 10);
 
-        if (qoiSize == 0) {
-            errorMessage = "Found empty QOI block";
+        if (blockSize == 0) {
+            errorMessage = "Found empty image block";
             return false;
         }
 
-        std::size_t qoiDataOffset = static_cast<std::size_t>(qoiOffset);
-        const std::size_t qoiDataSize = static_cast<std::size_t>(qoiSize);
+        std::size_t dataOffset = static_cast<std::size_t>(blockOffset);
+        const std::size_t dataSize = static_cast<std::size_t>(blockSize);
 
-        if (qoiDataOffset + qoiDataSize > fileBytes.size()) {
-            const std::size_t relativeOffset = headerEnd + qoiDataOffset;
-            if (relativeOffset + qoiDataSize <= fileBytes.size()) {
-                qoiDataOffset = relativeOffset;
+        if (dataOffset + dataSize > fileBytes.size()) {
+            const std::size_t relativeOffset = headerEnd + dataOffset;
+            if (relativeOffset + dataSize <= fileBytes.size()) {
+                dataOffset = relativeOffset;
             }
             else {
-                errorMessage = "QOI block range out of bounds";
+                errorMessage = "Image block range out of bounds";
                 return false;
             }
         }
 
-        qoi_desc desc{};
-        void* pixels = qoi_decode(fileBytes.data() + qoiDataOffset, static_cast<int>(qoiDataSize), &desc, 4);
-        if (pixels == nullptr) {
-            errorMessage = "Failed to decode QOI block";
-            return false;
-        }
+        const std::uint8_t* blockData = fileBytes.data() + dataOffset;
+        int imgW = 0, imgH = 0;
+        std::vector<std::uint8_t> tileRgba;
 
-        const std::size_t pixelBytes = static_cast<std::size_t>(desc.width) * static_cast<std::size_t>(desc.height) * 4;
+        // Detect format: WebP = "RIFF....WEBP", otherwise treat as QOI.
+        const bool isWebP = dataSize >= 12 &&
+            blockData[0] == 'R' && blockData[1] == 'I' &&
+            blockData[2] == 'F' && blockData[3] == 'F' &&
+            blockData[8] == 'W' && blockData[9] == 'E' &&
+            blockData[10] == 'B' && blockData[11] == 'P';
+
+        if (isWebP) {
+            uint8_t* pixels = WebPDecodeRGBA(blockData, dataSize, &imgW, &imgH);
+            if (pixels == nullptr) {
+                errorMessage = "Failed to decode WebP block";
+                return false;
+            }
+            tileRgba.assign(pixels, pixels + static_cast<std::size_t>(imgW) * static_cast<std::size_t>(imgH) * 4);
+            WebPFree(pixels);
+        } else {
+            qoi_desc desc{};
+            void* pixels = qoi_decode(blockData, static_cast<int>(dataSize), &desc, 4);
+            if (pixels == nullptr) {
+                errorMessage = "Failed to decode QOI block";
+                return false;
+            }
+            imgW = static_cast<int>(desc.width);
+            imgH = static_cast<int>(desc.height);
+            tileRgba.resize(static_cast<std::size_t>(imgW) * static_cast<std::size_t>(imgH) * 4);
+            std::memcpy(tileRgba.data(), pixels, tileRgba.size());
+            QOI_FREE(pixels);
+        }
 
         DecodedTile tile;
         tile.xOffset = xOffset;
         tile.logicalHeight = tileHeight;
-        tile.desc = desc;
-        tile.rgba.resize(pixelBytes);
-        std::memcpy(tile.rgba.data(), pixels, pixelBytes);
-        QOI_FREE(pixels);
+        tile.imgWidth = imgW;
+        tile.imgHeight = imgH;
+        tile.rgba = std::move(tileRgba);
 
         decodedTiles.emplace_back(std::move(tile));
     }
@@ -171,8 +197,8 @@ static bool DecodeYdg(
     for (const auto& tile : decodedTiles) {
         const int dstX = static_cast<int>(tile.xOffset);
         const int dstY = static_cast<int>(cursorY);
-        const int srcW = static_cast<int>(tile.desc.width);
-        const int srcH = static_cast<int>(tile.desc.height);
+        const int srcW = tile.imgWidth;
+        const int srcH = tile.imgHeight;
 
         if (dstY >= canvasHeight) {
             break;

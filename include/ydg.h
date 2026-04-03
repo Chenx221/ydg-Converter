@@ -3,8 +3,8 @@
 #pragma pack(push, 1)
 
 typedef struct {
-    uint32_t offset;         // QOI data block offset
-    uint32_t size;           // QOI data block size
+    uint32_t offset;         // data block offset
+    uint32_t size;           // data block size
     uint16_t x_offset;       // x_offset (guess)
     uint16_t tileHeight;     // tile height
     uint32_t unknown;        // unknown

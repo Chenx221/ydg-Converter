@@ -3,5 +3,5 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
-  <Project Path="ydg_converter.vcxproj" />
+  <Project Path="ydg_converter.vcxproj" Id="e4562be9-a7ce-4439-97b3-a956b1c395ec" />
 </Solution>
